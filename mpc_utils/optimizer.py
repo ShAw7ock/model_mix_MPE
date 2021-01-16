@@ -14,7 +14,7 @@ class Optimizer:
 
 
 class CEMOptimizer(Optimizer):
-    def __init__(self, sol_dim, max_iters, popsize, num_elites, cost_function,
+    def __init__(self, agent_num, sol_dim, max_iters, popsize, num_elites,
                  upper_bound=None, lower_bound=None, epsilon=0.001, alpha=0.25):
         """
         Creates an instance of this class.
@@ -33,6 +33,7 @@ class CEMOptimizer(Optimizer):
                 next_mean = alpha * old_mean + (1 - alpha) * elite_mean, and similarly for variance.
         """
         super(CEMOptimizer, self).__init__()
+        self.agent_num = agent_num
         self.sol_dim = sol_dim
         self.max_iters = max_iters
         self.popsize = popsize
@@ -41,16 +42,13 @@ class CEMOptimizer(Optimizer):
         self.ub, self.lb = upper_bound, lower_bound
         self.epsilon, self.alpha = epsilon, alpha
 
-        # TODO: The cost_function need to satisfy the bi-level optimization, so can not use a definitely cost function
-        self.cost_function = cost_function
-
         if num_elites > popsize:
             raise ValueError("Number of elites must be at most the population size.")
 
     def reset(self):
         pass
 
-    def obtain_solution(self, init_mean, init_var):
+    def obtain_solution(self, init_mean, init_var, rin_function):
         mean, var, t = init_mean, init_var, 0
         X = stats.truncnorm(-2, 2, loc=np.zeros_like(mean), scale=np.ones_like(var))
 
@@ -61,7 +59,7 @@ class CEMOptimizer(Optimizer):
             samples = X.rvs(size=[self.popsize, self.sol_dim]) * np.sqrt(constrained_var) + mean
             samples = samples.astype(np.float32)
 
-            costs = self.cost_function(samples)
+            costs = rin_function(samples, self.agent_num)
 
             elites = samples[np.argsort(costs)][:self.num_elites]
 

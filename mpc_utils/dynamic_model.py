@@ -11,7 +11,7 @@ class DynModel(nn.Module):
     def __init__(self, ensemble_size, in_features, out_features):
         super().__init__()
 
-        self.num_nets = ensemble_size   # Trick: Model ensemble
+        self.num_models = ensemble_size   # Trick: Model ensemble
 
         self.in_features = in_features
         self.out_features = out_features
@@ -82,7 +82,6 @@ def nn_constructor(num_models, input_dim, output_dim, load_models=None):
     ensemble_size = num_models
     model = DynModel(ensemble_size, input_dim, output_dim * 2).to(TORCH_DEVICE)
     # * 2 because we output both the mean and the variance
-
     model.optim = torch.optim.Adam(model.parameters(), lr=0.001)
 
     return model
