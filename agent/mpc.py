@@ -80,21 +80,27 @@ class MpcAgent:
                                      input_dim=self.model_input_dim,
                                      output_dim=self.model_output_dim)
 
-    def model_transition_train(self, obs, next_obs, actions):
+    def model_transition_train(self, batch):
         """
         Trains the internal model of transition function T(o'|o, a).
         Once trained, this agent switches from applying random actions to using MPC.
 
-        Arguments:
-            obs: tensor of observations. (n, obs_dim)
-            next_obs: tensor of next observations. (n, obs_dim)
-            actions: tensor of actions. (n, action_dim)
+        Below Arguments:
+            obs: array of observations. (n, obs_dim)
+            obs_next: array of next observations. (n, obs_dim)
+            actions: array of actions. (n, action_dim)
 
         Returns: None.
         """
-        new_train_in = torch.cat([self.obs_preproc(obs), actions], dim=-1)
-        new_train_targs = self.targ_proc(obs, next_obs)
-        # TODO: 那几个lambda function有点问题，存在tensor和ndarray的类型转换问题。self.train_in是array而new_train_in是tensor
+        obs, obs_next, actions = batch['o'][:, :, self.agent_num, :], batch['o_next'][:, :, self.agent_num, :],\
+                                 batch['u'][:, :, self.agent_num, :]
+        obs = np.reshape(obs, [-1, self.obs_dim])
+        obs_next = np.reshape(obs_next, [-1, self.obs_dim])
+        actions = np.reshape(actions, [-1, self.act_dim])
+
+        new_train_in = np.concatenate([obs, actions], axis=-1)
+        new_train_targs = obs_next
+
         self.train_in = np.concatenate([self.train_in, new_train_in], axis=0)
         self.train_targs = np.concatenate([self.train_targs, new_train_targs], axis=0)
 
@@ -112,7 +118,7 @@ class MpcAgent:
             for batch_num in range(num_batch):
                 batch_idxs = idxs[:, batch_num * self.batch_size:(batch_num + 1) * self.batch_size]
 
-                loss = 0.01 * (self.models.max_logvar.sum - self.models.min_logvar.sum())
+                loss = 0.01 * (self.models.max_logvar.sum() - self.models.min_logvar.sum())
                 loss += self.models.compute_decays()
 
                 train_in = torch.from_numpy(self.train_in[batch_idxs]).to(TORCH_DEVICE).float()

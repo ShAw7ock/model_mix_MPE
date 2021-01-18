@@ -5,13 +5,13 @@ import torch.nn.functional as F
 
 class RNN(nn.Module):
     # Because all the agents share the same network, input_shape=obs_shape+n_actions+n_agents
-    def __init__(self, input_shape, config):
+    def __init__(self, input_shape, n_actions, config):
         super(RNN, self).__init__()
         self.args = config
 
         self.fc1 = nn.Linear(input_shape, config.rnn_hidden_dim)
         self.rnn = nn.GRUCell(config.rnn_hidden_dim, config.rnn_hidden_dim)
-        self.fc2 = nn.Linear(config.rnn_hidden_dim, config.n_actions)
+        self.fc2 = nn.Linear(config.rnn_hidden_dim, n_actions)
 
     def forward(self, inputs, hidden_state):
         x = F.relu(self.fc1(inputs))

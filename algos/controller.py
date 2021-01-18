@@ -23,6 +23,12 @@ class Controller:
         self.agent_init_params = agent_init_params
         self.config = config
 
+    def update(self, batch, train_step):
+        for agent in self.agents:
+            agent.model_transition_train(batch)
+
+        self.rin_net.update(batch, self.config.episode_limit, train_step)
+
     def select_actions(self, observations):
         actions = []
         for agent, obs in zip(self.agents, observations):
@@ -50,7 +56,7 @@ class Controller:
         cur_agent = self.agents[agent_num]
         num_seq = act_seqs.shape[0]
         # 处理action sequence的类型和维度
-        act_seqs = torch.from_numpy(act_seqs).float().to(TORCH_DEVICE)
+        act_seqs = torch.from_numpy(act_seqs).long().to(TORCH_DEVICE)
         act_seqs = act_seqs.view(-1, cur_agent.task_horizon, cur_agent.act_dim)
         transposed = act_seqs.transpose(0, 1)
         expanded = transposed[:, :, None]
@@ -70,19 +76,20 @@ class Controller:
 
         # 复制一份该agent的eval_hidden，用于model想象的hidden_state不应该影响到真实环境train种的hidden_state更新
         hidden_state = self.rin_net.eval_hidden[:, agent_num, :]
+        hidden_state = hidden_state.expand(num_seq * cur_agent.n_particles, -1)
 
         returns = torch.zeros(num_seq, cur_agent.n_particles, device=TORCH_DEVICE)
 
         # t=0 ~ t=task_horizon属于model预测的想象部分
-        for t in cur_agent.task_horizon:
+        for t in range(cur_agent.task_horizon):
             cur_act = act_seqs[t]
 
             # 处理last_action用作RNN的输入inputs一部分
             last_act_onehot = torch.zeros(cur_agent.act_space).to(TORCH_DEVICE)
-            if t > 0:
-                last_act_onehot[act_seqs[t - 1]] = 1
             last_act_onehot = last_act_onehot[None]
             last_act_onehot = last_act_onehot.expand(num_seq * cur_agent.n_particles, -1)
+            if t > 0:
+                last_act_onehot[act_seqs[t - 1]] = 1
 
             inputs = torch.cat((cur_obs, last_act_onehot, agent_id), dim=-1)
 

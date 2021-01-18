@@ -20,7 +20,7 @@ class CEMOptimizer(Optimizer):
         Creates an instance of this class.
 
         Arguments:
-            sol_dim (int): The dimensionality of the problem space (task_horizon * action_space)
+            sol_dim (int): The dimensionality of the problem space (task_horizon * action_dim)
             max_iters (int): The maximum number of iterations to perform during optimization
             popsize (int): The number of candidate solutions to be sampled at every iteration
             num_elites (int): The number of top solutions that will be used to obtain the distribution
@@ -39,7 +39,6 @@ class CEMOptimizer(Optimizer):
         self.popsize = popsize
         self.num_elites = num_elites
 
-        self.ub, self.lb = upper_bound, lower_bound
         self.epsilon, self.alpha = epsilon, alpha
 
         if num_elites > popsize:
@@ -53,11 +52,11 @@ class CEMOptimizer(Optimizer):
         X = stats.truncnorm(-2, 2, loc=np.zeros_like(mean), scale=np.ones_like(var))
 
         while (t < self.max_iters) and np.max(var) > self.epsilon:
-            lb_dist, ub_dist = mean - self.lb, self.ub - mean
+            lb_dist, ub_dist = mean, -mean
             constrained_var = np.minimum(np.minimum(np.square(lb_dist / 2), np.square(ub_dist / 2)), var)
 
             samples = X.rvs(size=[self.popsize, self.sol_dim]) * np.sqrt(constrained_var) + mean
-            samples = samples.astype(np.float32)
+            samples = samples.astype(np.int64)
 
             costs = rin_function(samples, self.agent_num)
 

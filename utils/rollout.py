@@ -7,7 +7,7 @@ class RolloutWorker:
     def __init__(self, env, controller, config):
         self.env = env
         self.controller = controller
-        self.n_agents = len(controller.n_agents)
+        self.n_agents = controller.n_agents
         self.obs_shape = controller.obs_shape
         self.n_actions = controller.n_actions
         self.episode_limit = config.episode_limit
@@ -15,7 +15,7 @@ class RolloutWorker:
 
         assert config.n_rollout_threads == 1, "This code only require one parallel environment!"
 
-    def generate_episode(self, episode_num):
+    def generate_episode(self, episode_num=None):
         o, u, r, u_onehot, terminated = [], [], [], [], []
         obs = self.env.reset()
         terminate = False
@@ -30,20 +30,21 @@ class RolloutWorker:
             actions_onehot = []
             for action in actions:
                 action_onehot = np.zeros(self.n_actions)
+                # TODO: 这里作为action_onehot的index需要是一个int64的整型，但actions经过Optimizer选出来后是一个float
                 action_onehot[action] = 1
                 actions_onehot.append(action_onehot)
-            actions = actions.unsqueeze(0)
-            obs_next, rewards, terminates, infos = self.env.step(actions)
+            actions_onehot = [actions_onehot for _ in range(self.config.n_rollout_threads)]     # 与环境交互需要，list增加一维
+            obs_next, rewards, terminates, infos = self.env.step(actions_onehot)
             # 每个智能体收到的reward和terminate信息是一样的，按照buffer的设计，对reward和terminate降维处理
             rewards = rewards.reshape([-1, self.n_agents])
-            reward = np.mean(rewards, axis=-1)[0]
+            reward = np.mean(rewards, axis=-1)
             terminates = terminates.reshape([-1, self.n_agents])
-            terminate = np.mean(terminates, axis=-1)[0]
+            terminate = np.mean(terminates, axis=-1)
 
             o.append(obs)
             u.append(np.reshape(actions, [self.n_agents, 1]))   # 降维
             r.append(reward)
-            u_onehot.append(actions_onehot)
+            u_onehot.append(actions_onehot[0])  # 因为仅有一个平行环境，这里注意取出对应的actions_onehot存入Buffer中
             terminated.append(terminate)
 
             episode_reward += reward

@@ -69,3 +69,10 @@ class ReplayBuffer:
         if inc == 1:
             idx = idx[0]
         return idx
+
+    def get_average_rewards(self, N):
+        if self.current_size == self.size:
+            idxs = np.arange(self.current_idx - N, self.current_idx)
+        else:
+            idxs = np.arange(max(0, self.current_idx - N), self.current_idx)
+        return self.buffers['r'][idxs].mean()

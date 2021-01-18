@@ -16,11 +16,10 @@ class IntrinsicReward:
         input_shape = self.obs_shape + self.n_actions + self.n_agents
 
         # Neural Network
-        self.eval_rnn = RNN(input_shape, config).to(TORCH_DEVICE)
-        self.target_rnn = RNN(input_shape, config).to(TORCH_DEVICE)
+        self.eval_rnn = RNN(input_shape, n_actions, config).to(TORCH_DEVICE)
+        self.target_rnn = RNN(input_shape, n_actions, config).to(TORCH_DEVICE)
         self.eval_mix = MixNet().to(TORCH_DEVICE)
         self.target_mix = MixNet().to(TORCH_DEVICE)
-        self.config = config
 
         self.target_rnn.load_state_dict(self.eval_rnn.state_dict())
         self.target_mix.load_state_dict(self.eval_mix.state_dict())
@@ -106,5 +105,5 @@ class IntrinsicReward:
         return q_evals, q_targets
 
     def init_hidden(self, episode_num):
-        self.eval_hidden = torch.zeros((episode_num, self.n_agents, self.config.rnn_hidden_dim))
-        self.target_hidden = torch.zeros((episode_num, self.n_agents, self.config.rnn_hidden_dim))
+        self.eval_hidden = torch.zeros((episode_num, self.n_agents, self.config.rnn_hidden_dim)).to(TORCH_DEVICE)
+        self.target_hidden = torch.zeros((episode_num, self.n_agents, self.config.rnn_hidden_dim)).to(TORCH_DEVICE)
