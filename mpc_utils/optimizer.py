@@ -14,8 +14,8 @@ class Optimizer:
 
 
 class CEMOptimizer(Optimizer):
-    def __init__(self, agent_num, sol_dim, max_iters, popsize, num_elites,
-                 upper_bound=None, lower_bound=None, epsilon=0.001, alpha=0.25):
+    def __init__(self, agent_num, sol_dim, action_space, max_iters, popsize, num_elites,
+                 epsilon=0.001, alpha=0.25):
         """
         Creates an instance of this class.
 
@@ -25,8 +25,6 @@ class CEMOptimizer(Optimizer):
             popsize (int): The number of candidate solutions to be sampled at every iteration
             num_elites (int): The number of top solutions that will be used to obtain the distribution
                 at the next iteration.
-            upper_bound (np.array): An array of upper bounds
-            lower_bound (np.array): An array of lower bounds
             epsilon (float): A minimum variance. If the maximum variance drops below epsilon, optimization is
                 stopped.
             alpha (float): Controls how much of the previous mean and variance is used for the next iteration.
@@ -34,6 +32,7 @@ class CEMOptimizer(Optimizer):
         """
         super(CEMOptimizer, self).__init__()
         self.agent_num = agent_num
+        self.action_space = action_space
         self.sol_dim = sol_dim
         self.max_iters = max_iters
         self.popsize = popsize
@@ -47,27 +46,8 @@ class CEMOptimizer(Optimizer):
     def reset(self):
         pass
 
+    # 暂时使用Random shooting的方法
     def obtain_solution(self, init_mean, init_var, rin_function):
-        mean, var, t = init_mean, init_var, 0
-        X = stats.truncnorm(-2, 2, loc=np.zeros_like(mean), scale=np.ones_like(var))
-
-        while (t < self.max_iters) and np.max(var) > self.epsilon:
-            lb_dist, ub_dist = mean, -mean
-            constrained_var = np.minimum(np.minimum(np.square(lb_dist / 2), np.square(ub_dist / 2)), var)
-
-            samples = X.rvs(size=[self.popsize, self.sol_dim]) * np.sqrt(constrained_var) + mean
-            samples = samples.astype(np.int64)
-
-            costs = rin_function(samples, self.agent_num)
-
-            elites = samples[np.argsort(costs)][:self.num_elites]
-
-            new_mean = np.mean(elites, axis=0)
-            new_var = np.var(elites, axis=0)
-
-            mean = self.alpha * mean + (1 - self.alpha) * new_mean
-            var = self.alpha * var + (1 - self.alpha) * new_var
-
-            t += 1
-
-        return mean
+        solutions = np.random.randint(0, self.action_space, size=[self.popsize, self.sol_dim])
+        returns = rin_function(solutions, self.agent_num)
+        return solutions[np.argmax(returns)]

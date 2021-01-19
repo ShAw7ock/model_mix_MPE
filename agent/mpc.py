@@ -58,7 +58,8 @@ class MpcAgent:
 
         # Create action sequence optimizer
         self.optimizer = CEMOptimizer(
-            agent_num=agent_num, sol_dim=self.task_horizon * self.act_dim, max_iters=self.opt_max_iters,
+            agent_num=agent_num, sol_dim=self.task_horizon * self.act_dim, action_space=self.act_space,
+            max_iters=self.opt_max_iters,
             popsize=self.opt_popsize, num_elites=self.opt_num_elites, alpha=self.opt_alpha
         )
 
@@ -66,7 +67,7 @@ class MpcAgent:
         self.sy_cur_obs = None
         self.has_been_trained = params.model_pretrained
         self.act_buffer = np.array([]).reshape(0, self.act_dim)
-        # TODO: 初始采样的mean和var在这里看一下还需要改，因为动作是Discrete表示的，没有 upper_bound 和 lower_bound
+        # TODO: 离散动作采样不再需要初始的mean和var，取而代之的是初始的采样概率
         self.prev_sol = np.tile(0, [self.task_horizon])
         self.init_var = np.tile(1, [self.task_horizon])
         # self.train_in plays the role of buffer to store (s,a)
@@ -101,6 +102,7 @@ class MpcAgent:
         new_train_in = np.concatenate([obs, actions], axis=-1)
         new_train_targs = obs_next
 
+        # TODO: self.train_in这个用于训练模型的buffer不能一味的直接添加，同意爆内存（尤其是cuda内存本来就小）
         self.train_in = np.concatenate([self.train_in, new_train_in], axis=0)
         self.train_targs = np.concatenate([self.train_targs, new_train_targs], axis=0)
 
