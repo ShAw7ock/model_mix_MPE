@@ -107,3 +107,15 @@ class IntrinsicReward:
     def init_hidden(self, episode_num):
         self.eval_hidden = torch.zeros((episode_num, self.n_agents, self.config.rnn_hidden_dim)).to(TORCH_DEVICE)
         self.target_hidden = torch.zeros((episode_num, self.n_agents, self.config.rnn_hidden_dim)).to(TORCH_DEVICE)
+
+    def get_params(self):
+        return {'eval_rnn': self.eval_rnn.state_dict(),
+                'target_rnn': self.target_rnn.state_dict(),
+                'eval_mix': self.eval_mix.state_dict(),
+                'target_mix': self.target_mix.state_dict()}
+
+    def load_params(self, params):
+        self.eval_rnn.load_state_dict(params['eval_rnn'])
+        self.target_rnn.load_state_dict(params['target_rnn'])
+        self.eval_mix.load_state_dict(params['eval_mix'])
+        self.target_mix.load_state_dict(params['target_mix'])

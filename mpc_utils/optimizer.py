@@ -47,7 +47,28 @@ class CEMOptimizer(Optimizer):
         pass
 
     # 暂时使用Random shooting的方法
-    def obtain_solution(self, init_mean, init_var, rin_function):
+    def obtain_solution(self, rin_function):
         solutions = np.random.randint(0, self.action_space, size=[self.popsize, self.sol_dim])
-        returns = rin_function(solutions, self.agent_num)
-        return solutions[np.argmax(returns)]
+        returns, hidden_state_candidate = rin_function(solutions, self.agent_num)
+        return solutions[np.argmax(returns)], hidden_state_candidate[np.argmax(returns)]
+
+    def prob_update_solution(self, prev_prob, rin_function):
+        probs, t = prev_prob, 0
+        act_candidate = np.arange(self.action_space)
+
+        X = stats.rv_discrete(values=(act_candidate, probs))
+
+        samples = X.rvs(size=[self.popsize, self.sol_dim])
+
+        returns = rin_function(samples)
+        elites = samples[np.argsort(returns)][-self.num_elites:]
+
+        nums_act, this_probs = np.zeros_like(act_candidate), np.zeros_like(act_candidate)
+        for i in range(elites.shape[0]):
+            for j in range(elites.shape[1]):
+                cur = elites[i][j]
+                nums_act[cur] += 1
+        for i in range(self.action_space):
+            this_probs[i] = nums_act[i] / (self.num_elites * self.sol_dim)
+
+        return samples[np.argmax(returns)], this_probs

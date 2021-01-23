@@ -9,7 +9,9 @@ from utils.buffer import ReplayBuffer
 from utils.rollout import RolloutWorker
 from utils.env_wrappers import SubprocVecEnv, DummyVecEnv
 from algos.controller import Controller
+import matplotlib
 import matplotlib.pyplot as plt
+matplotlib.use('TkAgg')
 
 
 def train_your_mode():
@@ -57,15 +59,32 @@ def run(config):
     rolloutworker = RolloutWorker(env, controller, config)
 
     train_step = 0
+    mean_episode_rewards = []
     for ep_i in range(config.n_episodes):
-        episode, _ = rolloutworker.generate_episode()
+        episode, ep_rew, mean_ep_rew = rolloutworker.generate_episode()
         buffer.push(episode)
         for step in range(config.n_train_steps):
             mini_batch = buffer.sample(min(len(buffer), config.batch_size))
             controller.update(mini_batch, train_step)
             train_step += 1
-        ep_rew = buffer.get_average_rewards(config.episode_limit * config.n_rollout_threads)
-        print("This episode's reward is: ", ep_rew)
+        # ep_rew = buffer.get_average_rewards(config.episode_limit * config.n_rollout_threads)
+        mean_episode_rewards.append(mean_ep_rew)
+        print("Episode {} : Total reward {} , Mean reward {}" .format(ep_i + 1, ep_rew, mean_ep_rew))
+
+        if ep_i % config.save_interval < config.n_rollout_threads:
+            os.makedirs(str(run_dir / 'incremental'), exist_ok=True)
+            controller.save(str(run_dir / 'incremental' / ('model_ep%i.pt' % (ep_i + 1))))
+            controller.save(str(run_dir / 'model.pt'))
+
+    controller.save(str(run_dir / 'model.pt'))
+    env.close()
+
+    index = list(range(1, len(mean_episode_rewards) + 1))
+    plt.plot(index, mean_episode_rewards)
+    plt.ylabel("Mean Episode Reward")
+    plt.savefig(str(fig_dir) + '/mean_episode_reward.jpg')
+    # plt.show()
+    plt.close()
 
 
 if __name__ == "__main__":
@@ -75,12 +94,14 @@ if __name__ == "__main__":
                         help="Name of environment")
     parser.add_argument("--seed", default=1, type=int, help="Random seed")
     parser.add_argument("--n_rollout_threads", default=1, type=int, help="For simple test, we assume here to be 1")
-    parser.add_argument("--n_episodes", default=5000, type=int, help="Total episodes to train")
+    parser.add_argument("--n_episodes", default=1000, type=int, help="Total episodes to train")
     parser.add_argument("--n_train_steps", default=1, type=int, help="Training steps with buffer storage")
+    parser.add_argument("--save_interval", default=100, type=int, help="The step interval between the saving model")
+    parser.add_argument("--display", default=False, type=bool, help="Choose to render while training")
 
     # Arguments for Intrinsic Reward Network
-    parser.add_argument("--episode_limit", default=20, type=int, help="The length of each episode sampling length")
-    parser.add_argument("--buffer_size", default=int(5e3), type=int)
+    parser.add_argument("--episode_limit", default=25, type=int, help="The length of each episode sampling length")
+    parser.add_argument("--buffer_size", default=int(200), type=int)
     parser.add_argument("--batch_size", default=32, type=int)
     parser.add_argument("--lr", default=5e-4, type=float)
     parser.add_argument("--gamma", default=0.99, type=float)
@@ -98,7 +119,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_pretrained", default=False, type=bool)
 
     # Arguments for MPC Model optimizer config
-    parser.add_argument("--task_horizon", default=20, type=int, help="The forward steps using the internal models")
+    parser.add_argument("--task_horizon", default=10, type=int, help="The forward steps using the internal models")
     parser.add_argument("--opt_alpha", default=0.1, type=float, help="The weight while updating the optimizer")
     parser.add_argument("--opt_max_iters", default=5, type=int)
     parser.add_argument("--opt_num_elites", default=40, type=int, help="The number to choose to update the optimizer")

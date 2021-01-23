@@ -21,16 +21,18 @@ class RolloutWorker:
         terminate = False
         step = 0
         episode_reward = 0
-        self.controller.rin_net.init_hidden(1)
+        self.controller.reset()
 
         while not terminate and step < self.episode_limit:
+            if self.config.display:
+                for env_show in self.env.envs:
+                    env_show.render('human')
             # 这里需要考虑到粒子环境的多线程环境问题处理
             obs = obs.squeeze(0)  # 约束本环境仅能有1个并行环境，这里可以做降维
             actions = self.controller.select_actions(obs)
             actions_onehot = []
             for action in actions:
                 action_onehot = np.zeros(self.n_actions)
-                # TODO: 这里作为action_onehot的index需要是一个int64的整型，但actions经过Optimizer选出来后是一个float
                 action_onehot[action] = 1
                 actions_onehot.append(action_onehot)
             actions_onehot = [actions_onehot for _ in range(self.config.n_rollout_threads)]     # 与环境交互需要，list增加一维
@@ -68,4 +70,4 @@ class RolloutWorker:
         for key in episode.keys():
             episode[key] = np.array([episode[key]])
 
-        return episode, episode_reward
+        return episode, episode_reward, np.mean(r)

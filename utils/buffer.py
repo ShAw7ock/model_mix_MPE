@@ -75,4 +75,4 @@ class ReplayBuffer:
             idxs = np.arange(self.current_idx - N, self.current_idx)
         else:
             idxs = np.arange(max(0, self.current_idx - N), self.current_idx)
-        return self.buffers['r'][idxs].mean()
+        return self.buffers['r'][self.current_idx][idxs].mean()

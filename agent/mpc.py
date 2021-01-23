@@ -68,13 +68,14 @@ class MpcAgent:
         self.has_been_trained = params.model_pretrained
         self.act_buffer = np.array([]).reshape(0, self.act_dim)
         # TODO: 离散动作采样不再需要初始的mean和var，取而代之的是初始的采样概率
-        self.prev_sol = np.tile(0, [self.task_horizon])
+        self.prev_sol = np.zeros(self.act_space)
         self.init_var = np.tile(1, [self.task_horizon])
+        self.prev_prob = np.ones_like([self.act_space]) / self.act_space
         # self.train_in plays the role of buffer to store (s,a)
-        self.train_in = np.array([]).reshape(0, self.act_dim + self.obs_preproc(np.zeros([1, self.obs_dim])).shape[-1])
-        self.train_targs = np.array([]).reshape(
-            0, self.targ_proc(np.zeros([1, self.obs_dim]), np.zeros([1, self.obs_dim])).shape[-1]
-        )
+        self.buffer_size = params.buffer_size
+        self.current_idx, self.current_size = 0, 0
+        self.train_in = np.empty([self.buffer_size * params.episode_limit, self.obs_dim + self.act_dim])
+        self.train_targs = np.empty([self.buffer_size * params.episode_limit, self.obs_dim])
 
         # Set up the local model for each agent
         self.models = nn_constructor(num_models=self.num_models,
@@ -99,12 +100,14 @@ class MpcAgent:
         obs_next = np.reshape(obs_next, [-1, self.obs_dim])
         actions = np.reshape(actions, [-1, self.act_dim])
 
+        store_inc = obs.shape[0]
         new_train_in = np.concatenate([obs, actions], axis=-1)
         new_train_targs = obs_next
 
-        # TODO: self.train_in这个用于训练模型的buffer不能一味的直接添加，同意爆内存（尤其是cuda内存本来就小）
-        self.train_in = np.concatenate([self.train_in, new_train_in], axis=0)
-        self.train_targs = np.concatenate([self.train_targs, new_train_targs], axis=0)
+        # 添加训练数据进入Model_transition的buffer中
+        idxs = self._get_storage_idx(inc=store_inc)
+        self.train_in[idxs] = new_train_in
+        self.train_targs[idxs] = new_train_targs
 
         # Change the signal of pretrained
         self.has_been_trained = True
@@ -112,7 +115,7 @@ class MpcAgent:
         # Fit the input mean and variance
         self.models.fit_input_stats(self.train_in)
 
-        idxs = np.random.randint(self.train_in.shape[0], size=[self.models.num_models, self.train_in.shape[0]])
+        idxs = np.random.randint(self.current_size, size=[self.models.num_models, self.current_size])
         epoch_range = trange(self.model_train_epochs, unit="epoch(s)", desc="Network training")
         num_batch = int(np.ceil(idxs.shape[-1] / self.batch_size))
 
@@ -141,8 +144,8 @@ class MpcAgent:
             # 打乱idxs的顺序，每一个epoch重新选取用作训练的idxs
             idxs = shuffle_rows(idxs)
 
-            val_in = torch.from_numpy(self.train_in[idxs[:5000]]).to(TORCH_DEVICE).float()
-            val_targ = torch.from_numpy(self.train_targs[idxs[:5000]]).to(TORCH_DEVICE).float()
+            val_in = torch.from_numpy(self.train_in[idxs[:self.current_size]]).to(TORCH_DEVICE).float()
+            val_targ = torch.from_numpy(self.train_targs[idxs[:self.current_size]]).to(TORCH_DEVICE).float()
 
             mean, _ = self.models(val_in)
             mse_losses = ((mean - val_targ) ** 2).mean(-1).mean(-1)
@@ -152,7 +155,7 @@ class MpcAgent:
             })
 
     def reset(self):
-        self.prev_sol = np.tile(0, [self.task_horizon])
+        self.prev_sol = np.zeros(self.act_space)
         self.optimizer.reset()
 
     def expand_to_model_format(self, mat):
@@ -180,3 +183,27 @@ class MpcAgent:
         reshaped = transposed.contiguous().view(-1, dim)
 
         return reshaped
+
+    def _get_storage_idx(self, inc):
+        if self.current_idx + inc <= self.buffer_size:
+            idx = np.arange(self.current_idx, self.current_idx + inc)
+            self.current_idx += inc
+        elif self.current_idx < self.buffer_size:
+            overflow = inc - (self.buffer_size - self.current_idx)
+            idx_a = np.arange(self.current_idx, self.buffer_size)
+            idx_b = np.arange(0, overflow)
+            idx = np.concatenate([idx_a, idx_b])
+            self.current_idx = overflow
+        else:
+            idx = np.arange(0, inc)
+            self.current_idx = inc
+        self.current_size = min(self.buffer_size, self.current_size + inc)
+        if inc == 1:
+            idx = idx[0]
+        return idx
+
+    def get_params(self):
+        return {'models': self.models.state_dict()}
+
+    def load_params(self, params):
+        self.models.load_state_dict(params['models'])

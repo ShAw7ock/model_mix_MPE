@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 from gym.spaces import Tuple, Box, Discrete
+from copy import *
 
 from agent.mpc import MpcAgent
 from agent.rin import IntrinsicReward
@@ -29,24 +30,29 @@ class Controller:
 
         self.rin_net.update(batch, self.config.episode_limit, train_step)
 
+    # initialize the parameters of MPC and rin's hidden states
+    def reset(self):
+        for agent in self.agents:
+            agent.reset()
+
+        self.rin_net.init_hidden(1)
+
     def select_actions(self, observations):
         actions = []
         for agent, obs in zip(self.agents, observations):
             if not agent.has_been_trained:
                 action = np.random.choice(range(self.n_actions))
-                actions.append(action)
-                continue
-            if agent.act_buffer.shape[0] > 0:
-                # 这一步会选出最优的动作选出，并把self.act_buffer清空
-                action, agent.act_buffer = agent.act_buffer[0], agent.act_buffer[1:]
             else:
                 agent.sy_cur_obs = obs
-                soln = agent.optimizer.obtain_solution(agent.prev_sol, agent.init_var, self._compile_acc_rin)
+                soln, hidden_state = agent.optimizer.obtain_solution(self._compile_acc_rin)
                 # agent.per 决定action sequence多久更新一个，故动作序列中的动作个数为 agent.per * agent.dU (agent.per = 1)
-                agent.prev_sol = np.concatenate([np.copy(soln)[agent.per * agent.act_dim:],
-                                                 np.zeros(agent.per * agent.act_dim)])
                 agent.act_buffer = soln[:agent.per * agent.act_dim].reshape(-1, agent.act_dim)
+
                 action, agent.act_buffer = agent.act_buffer[0], agent.act_buffer[1:]
+                self.rin_net.eval_hidden[:, agent.agent_num, :] = hidden_state.unsqueeze(0)
+            # 为下一个step的模型预测的第一个状态加上上一个step选择的动作作为last_act_onehot
+            agent.prev_sol = np.zeros(self.n_actions)
+            agent.prev_sol[action] = 1
             actions.append(action)
 
         return actions
@@ -56,7 +62,7 @@ class Controller:
         cur_agent = self.agents[agent_num]
         num_seq = act_seqs.shape[0]
         # 处理action sequence的类型和维度
-        act_seqs = torch.from_numpy(act_seqs).long().to(TORCH_DEVICE)
+        act_seqs = torch.from_numpy(act_seqs).long().to(TORCH_DEVICE)   # 注意这里转换为long()格式，否则torch.gather会报错
         act_seqs = act_seqs.view(-1, cur_agent.task_horizon, cur_agent.act_dim)
         transposed = act_seqs.transpose(0, 1)
         expanded = transposed[:, :, None]
@@ -84,16 +90,22 @@ class Controller:
         for t in range(cur_agent.task_horizon):
             cur_act = act_seqs[t]
 
-            # 处理last_action用作RNN的输入inputs一部分
-            last_act_onehot = torch.zeros(cur_agent.act_space).to(TORCH_DEVICE)
-            last_act_onehot = last_act_onehot[None]
-            last_act_onehot = last_act_onehot.expand(num_seq * cur_agent.n_particles, -1)
+            # t > 0时直接选用act_seqs[t]序列中的前一个动作作last_act
             if t > 0:
-                last_act_onehot[act_seqs[t - 1]] = 1
+                last_act = act_seqs[t - 1]
+                last_act_onehot = torch.zeros(last_act.shape[0], cur_agent.act_space).to(TORCH_DEVICE).scatter_(1, last_act, 1)
+            # t == 0时，要选用上一个真实状态走出的动作（保存在agent.prev_sol中，初始为全0）来作为last_act
+            else:
+                last_act_onehot = torch.from_numpy(cur_agent.prev_sol).float().to(TORCH_DEVICE)
+                last_act_onehot = last_act_onehot[None]
+                last_act_onehot = last_act_onehot.expand(num_seq * cur_agent.n_particles, -1)
 
             inputs = torch.cat((cur_obs, last_act_onehot, agent_id), dim=-1)
 
             rin, hidden_state = self.rin_net.eval_rnn(inputs, hidden_state)
+            if t == 0:
+                hidden_state_candidate = deepcopy(hidden_state)
+                hidden_state_candidate = hidden_state_candidate.view(num_seq, cur_agent.n_particles, -1).mean(dim=1)
             rin = torch.gather(rin, dim=1, index=cur_act)
             rin = rin.view(-1, cur_agent.n_particles)
 
@@ -101,7 +113,7 @@ class Controller:
 
             cur_obs = self._predict_next_obs(cur_obs, cur_act, agent_num)
 
-        return returns.mean(dim=1).detach().cpu().numpy()
+        return returns.mean(dim=1).detach().cpu().numpy(), hidden_state_candidate
 
     def _predict_next_obs(self, obs, act, agent_num):
         cur_agent = self.agents[agent_num]
@@ -117,6 +129,12 @@ class Controller:
         predictions = cur_agent.flatten_to_matrix(predictions)
 
         return predictions
+
+    def save(self, filename):
+        save_dict = {'init_dict': self.init_dict,
+                     'agent_models': [agent.get_params() for agent in self.agents],
+                     'rin_params': self.rin_net.get_params()}
+        torch.save(save_dict, filename)
 
     @classmethod
     def init_from_env(cls, env, config, agent_algo="MADDPG", adversary_algo="MADDPG"):
@@ -156,4 +174,14 @@ class Controller:
                      'agent_init_params': agent_init_params}
         instance = cls(**init_dict)
         instance.init_dict = init_dict
+        return instance
+
+    @classmethod
+    def init_from_save(cls, filename):
+        save_dict = torch.load(filename)
+        instance = cls(**save_dict['init_dict'])
+        instance.init_dict = save_dict['init_dict']
+        for agent, model in zip(instance.agents, save_dict['agent_models']):
+            agent.load_params(model)
+        instance.rin_net.load_params(save_dict['rin_params'])
         return instance
